@@ -37,7 +37,7 @@ const user2Error = computed(() => usernameFieldError(user2Exists.value, user2Wat
 
 function usernameFieldError(exists, watchlistPublic) {
   if (exists === false) return "This username doesn't exist on Letterboxd."
-  if (exists === true && watchlistPublic === false) return "This user's watchlist isn't public."
+  if (exists === true && watchlistPublic === false) return "This user's watchlist isn't public, or is empty."
   return null
 }
 

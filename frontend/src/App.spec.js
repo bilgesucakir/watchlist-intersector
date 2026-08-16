@@ -67,7 +67,7 @@ describe('App', () => {
     const wrapper = mount(App)
     await setUsernames(wrapper, 'alice', 'bob')
 
-    expect(wrapper.text()).toContain("This user's watchlist isn't public.")
+    expect(wrapper.text()).toContain("This user's watchlist isn't public, or is empty.")
     expect(wrapper.text()).not.toContain("doesn't exist")
     expect(wrapper.find('button').attributes('disabled')).toBeDefined()
   })
