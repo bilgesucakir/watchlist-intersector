@@ -3,8 +3,7 @@
 Given two Letterboxd usernames, finds the films on both users' public
 watchlists and links out to each match's Letterboxd film page.
 
-No official Letterboxd API is used (they don't grant access for personal
-projects) — this scrapes the public watchlist HTML pages with Jsoup.
+Scrapes the public watchlist HTML pages with Jsoup.
 
 ## Run
 
