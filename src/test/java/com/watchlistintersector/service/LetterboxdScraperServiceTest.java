@@ -98,6 +98,15 @@ class LetterboxdScraperServiceTest {
     }
 
     @Test
+    void extractsYearFromTitle() {
+        WatchlistResult result = scraperService.fetchWatchlist("alice");
+
+        assertThat(result.films())
+                .extracting(film -> film.year())
+                .containsOnly(2024);
+    }
+
+    @Test
     void fallsBackToPosterAltTextWhenDataAttributesAreMissing() {
         server.createContext("/noattrs/watchlist/", exchange -> respond(exchange, 200, """
                 <html><body>
@@ -115,6 +124,23 @@ class LetterboxdScraperServiceTest {
     }
 
     @Test
+    void yearIsNullWhenTitleHasNoYear() {
+        server.createContext("/noyear/watchlist/", exchange -> respond(exchange, 200, """
+                <html><body>
+                  <div data-item-slug="dune-part-two" class="poster">
+                    <img alt="Dune: Part Two" src="empty-poster.jpg"/>
+                  </div>
+                </body></html>
+                """));
+
+        WatchlistResult result = scraperService.fetchWatchlist("noyear");
+
+        assertThat(result.films())
+                .extracting(film -> film.year())
+                .containsExactly((Integer) null);
+    }
+
+    @Test
     void treatsPageWithNoFilmTilesAsInaccessible() {
         WatchlistResult result = scraperService.fetchWatchlist("bob");
 
@@ -128,5 +154,29 @@ class LetterboxdScraperServiceTest {
 
         assertThat(result.accessible()).isFalse();
         assertThat(result.films()).isEmpty();
+    }
+
+    @Test
+    void checkUsernameReportsUserExistsAndWatchlistPublicWhenPageHasFilmTiles() {
+        UsernameCheck check = scraperService.checkUsername("alice");
+
+        assertThat(check.userExists()).isTrue();
+        assertThat(check.watchlistPublic()).isTrue();
+    }
+
+    @Test
+    void checkUsernameReportsUserExistsButWatchlistNotPublicWhenPageHasNoFilmTiles() {
+        UsernameCheck check = scraperService.checkUsername("bob");
+
+        assertThat(check.userExists()).isTrue();
+        assertThat(check.watchlistPublic()).isFalse();
+    }
+
+    @Test
+    void checkUsernameReportsUserDoesNotExistOn404() {
+        UsernameCheck check = scraperService.checkUsername("ghost");
+
+        assertThat(check.userExists()).isFalse();
+        assertThat(check.watchlistPublic()).isFalse();
     }
 }

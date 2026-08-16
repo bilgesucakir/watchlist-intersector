@@ -32,13 +32,13 @@ npm run dev
 
 ## Test
 
-Backend (JUnit + Mockito):
-
 ```
 mvn test
 ```
 
-Frontend (Vitest + Vue Test Utils):
+Runs both the backend suite (JUnit + Mockito) and the frontend suite
+(Vitest + Vue Test Utils). Skip the frontend half with
+`-Dskip.frontend.build=true`, or run it on its own:
 
 ```
 cd frontend
@@ -54,3 +54,10 @@ GET /api/intersect?user1={username}&user2={username}
 Returns `200` with a JSON array of `{ title, url }` on success, or `400`
 with `{ error }` if either watchlist is private or the username doesn't
 exist.
+
+```
+GET /api/users/{username}/exists
+```
+
+Returns `200` with `{ exists: true|false }`, used by the frontend to
+validate a username as it's typed, before enabling the submit button.
