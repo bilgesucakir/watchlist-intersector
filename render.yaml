@@ -1,0 +1,6 @@
+services:
+  - type: web
+    name: watchlist-intersector
+    env: docker
+    plan: free
+    healthCheckPath: /
