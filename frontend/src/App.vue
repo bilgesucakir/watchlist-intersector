@@ -10,6 +10,13 @@ const error = ref('')
 const matches = ref(null)
 const sameUsernameError = ref(false)
 
+// Which search is in flight, used only to label the right button ('all' |
+// 'tonight' | null). Whether the *last completed* search was random mode is
+// tracked separately in lastSearchWasRandom, since it needs to survive after
+// pendingAction resets back to null.
+const pendingAction = ref(null)
+const lastSearchWasRandom = ref(false)
+
 // Usernames the current `matches` results actually came from, captured at
 // search time so the CSV filename stays correct even if the inputs are
 // edited afterward without re-searching.
@@ -17,11 +24,13 @@ const searchedUser1 = ref('')
 const searchedUser2 = ref('')
 
 // Each is null until checked (empty field, or check still pending), then true/false.
-// watchlistPublic is only meaningful once exists is true.
+// watchlistPublic and avatarUrl are only meaningful once exists is true.
 const user1Exists = ref(null)
 const user2Exists = ref(null)
 const user1WatchlistPublic = ref(null)
 const user2WatchlistPublic = ref(null)
+const user1AvatarUrl = ref(null)
+const user2AvatarUrl = ref(null)
 
 const hasEmptyField = computed(() => !user1.value.trim() || !user2.value.trim())
 const canSubmit = computed(
@@ -44,21 +53,26 @@ function usernameFieldError(exists, watchlistPublic) {
 async function checkUsername(username) {
   try {
     const response = await fetch(`/api/users/${encodeURIComponent(username)}/exists`)
-    if (!response.ok) return { exists: false, watchlistPublic: false }
+    if (!response.ok) return { exists: false, watchlistPublic: false, avatarUrl: null }
     const body = await response.json()
-    return { exists: body.exists === true, watchlistPublic: body.watchlistPublic === true }
+    return {
+      exists: body.exists === true,
+      watchlistPublic: body.watchlistPublic === true,
+      avatarUrl: body.avatarUrl ?? null
+    }
   } catch (e) {
-    return { exists: false, watchlistPublic: false }
+    return { exists: false, watchlistPublic: false, avatarUrl: null }
   }
 }
 
-function watchUsername(usernameRef, existsRef, watchlistPublicRef) {
+function watchUsername(usernameRef, existsRef, watchlistPublicRef, avatarUrlRef) {
   let timer = null
   watch(usernameRef, (value) => {
     clearTimeout(timer)
     const trimmed = value.trim()
     existsRef.value = null
     watchlistPublicRef.value = null
+    avatarUrlRef.value = null
 
     if (!trimmed) return
 
@@ -68,18 +82,20 @@ function watchUsername(usernameRef, existsRef, watchlistPublicRef) {
       if (usernameRef.value.trim() === trimmed) {
         existsRef.value = result.exists
         watchlistPublicRef.value = result.watchlistPublic
+        avatarUrlRef.value = result.avatarUrl
       }
     }, USERNAME_CHECK_DEBOUNCE_MS)
   })
 }
 
-watchUsername(user1, user1Exists, user1WatchlistPublic)
-watchUsername(user2, user2Exists, user2WatchlistPublic)
+watchUsername(user1, user1Exists, user1WatchlistPublic, user1AvatarUrl)
+watchUsername(user2, user2Exists, user2WatchlistPublic, user2AvatarUrl)
 
-async function findMatches() {
+async function search(random) {
   error.value = ''
   matches.value = null
   sameUsernameError.value = false
+  lastSearchWasRandom.value = random
 
   if (hasEmptyField.value) return
 
@@ -92,8 +108,10 @@ async function findMatches() {
   }
 
   loading.value = true
+  pendingAction.value = random ? 'tonight' : 'all'
 
   const params = new URLSearchParams({ user1: u1, user2: u2 })
+  if (random) params.set('random', 'true')
 
   try {
     const response = await fetch(`/api/intersect?${params}`)
@@ -111,7 +129,16 @@ async function findMatches() {
     error.value = 'Could not reach the server. Please try again.'
   } finally {
     loading.value = false
+    pendingAction.value = null
   }
+}
+
+function findAllMatches() {
+  return search(false)
+}
+
+function findTonightsPick() {
+  return search(true)
 }
 
 // Letterboxd's list-import CSV matches by title text, so the year needs to
@@ -164,40 +191,52 @@ function downloadCsv() {
         1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0 0 16 8c0-4.42-3.58-8-8-8z"
       />
     </svg>
-    <span>watchlist-intersector on GitHub</span>
+    <span>GitHub</span>
   </a>
 
   <main class="page">
-    <h1>Watchlist Intersector</h1>
-    <p class="subtitle">Find films on both Letterboxd users' watchlists.</p>
+    <h1>What We'll Watch Tonight</h1>
+    <p class="subtitle">
+      Pick something from both your Letterboxd watchlists — or see everything you have in common.
+    </p>
 
-    <form class="form" @submit.prevent="findMatches">
+    <form class="form" @submit.prevent="findTonightsPick">
       <div class="field">
-        <input
-          v-model="user1"
-          type="text"
-          placeholder="Letterboxd username 1"
-          :disabled="loading"
-          autocomplete="off"
-        />
+        <div class="input-row">
+          <input
+            v-model="user1"
+            type="text"
+            placeholder="Letterboxd username 1"
+            :disabled="loading"
+            autocomplete="off"
+          />
+          <img v-if="user1AvatarUrl" :src="user1AvatarUrl" alt="" class="avatar" />
+        </div>
         <p v-if="user1Error" class="field-error">{{ user1Error }}</p>
       </div>
       <div class="field">
-        <input
-          v-model="user2"
-          type="text"
-          placeholder="Letterboxd username 2"
-          :disabled="loading"
-          autocomplete="off"
-        />
+        <div class="input-row">
+          <input
+            v-model="user2"
+            type="text"
+            placeholder="Letterboxd username 2"
+            :disabled="loading"
+            autocomplete="off"
+          />
+          <img v-if="user2AvatarUrl" :src="user2AvatarUrl" alt="" class="avatar" />
+        </div>
         <p v-if="user2Error" class="field-error">{{ user2Error }}</p>
       </div>
       <button type="submit" :disabled="!canSubmit">
-        {{ loading ? 'Searching…' : 'Find matches' }}
+        {{ pendingAction === 'tonight' ? 'Searching…' : '🎲 Pick Something to Watch' }}
+      </button>
+      <button type="button" class="all-matches-button" :disabled="!canSubmit" @click="findAllMatches">
+        {{ pendingAction === 'all' ? 'Searching…' : 'Return all films in both watchlists' }}
       </button>
     </form>
 
-    <p v-if="loading" class="status">
+    <p v-if="loading" class="status loading">
+      <span class="spinner" aria-hidden="true"></span>
       Scraping both watchlists, this can take a little while for large lists…
     </p>
 
@@ -208,19 +247,52 @@ function downloadCsv() {
 
     <template v-if="matches !== null && !loading">
       <p v-if="matches.length === 0" class="status">No films in common.</p>
+
+      <template v-else-if="lastSearchWasRandom">
+        <div class="picked-film">
+          <img
+            v-if="matches[0].posterUrl"
+            :src="matches[0].posterUrl"
+            :alt="matches[0].title"
+            class="picked-poster"
+          />
+          <div v-else class="picked-poster poster-placeholder" aria-hidden="true"></div>
+          <div class="picked-info">
+            <p class="picked-label">Tonight's pick</p>
+            <a
+              :href="matches[0].url"
+              target="_blank"
+              rel="noopener noreferrer"
+              class="picked-title"
+            >{{ matches[0].title }}</a>
+          </div>
+        </div>
+        <p class="tmdb-attribution">Posters from <a href="https://www.themoviedb.org/" target="_blank" rel="noopener noreferrer">TMDB</a></p>
+      </template>
+
       <template v-else>
-        <button type="button" class="download-button" @click="downloadCsv">Download CSV</button>
         <ul class="results">
           <li v-for="film in matches" :key="film.url">
-            <a :href="film.url" target="_blank" rel="noopener noreferrer">{{ film.title }}</a>
+            <a :href="film.url" target="_blank" rel="noopener noreferrer">
+              <img v-if="film.posterUrl" :src="film.posterUrl" :alt="film.title" class="poster" />
+              <div v-else class="poster poster-placeholder" aria-hidden="true"></div>
+              <span class="poster-title">{{ film.title }}</span>
+            </a>
           </li>
         </ul>
+        <button type="button" class="download-button download-button-small" @click="downloadCsv">Download CSV</button>
+        <p class="tmdb-attribution">Posters from <a href="https://www.themoviedb.org/" target="_blank" rel="noopener noreferrer">TMDB</a></p>
       </template>
     </template>
   </main>
 </template>
 
 <style scoped>
+:global(body) {
+  background: #121212;
+  margin: 0;
+}
+
 .github-link {
   position: fixed;
   top: 1rem;
@@ -228,13 +300,13 @@ function downloadCsv() {
   display: inline-flex;
   align-items: center;
   gap: 0.4rem;
-  color: #333;
+  color: #e0e0e0;
   font-size: 0.9rem;
   text-decoration: none;
 }
 
 .github-link:hover {
-  color: #00c030;
+  color: #4a8f63;
 }
 
 .page {
@@ -242,6 +314,7 @@ function downloadCsv() {
   margin: 3rem auto;
   padding: 0 1.5rem;
   font-family: system-ui, sans-serif;
+  color: #f0f0f0;
 }
 
 h1 {
@@ -249,7 +322,7 @@ h1 {
 }
 
 .subtitle {
-  color: #666;
+  color: #999;
   margin-top: 0;
   margin-bottom: 2rem;
 }
@@ -266,6 +339,26 @@ h1 {
   gap: 0.35rem;
 }
 
+.input-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.input-row input {
+  flex: 1;
+  min-width: 0;
+}
+
+.avatar {
+  width: 2rem;
+  height: 2rem;
+  border-radius: 50%;
+  object-fit: cover;
+  flex-shrink: 0;
+  border: 2px solid #ccc;
+}
+
 .field-error {
   margin: 0;
   font-size: 0.85rem;
@@ -280,8 +373,13 @@ button {
   border: 1px solid #ccc;
 }
 
+input {
+  background: #242424;
+  color: #e0e0e0;
+}
+
 button {
-  background: #00c030;
+  background: #4a8f63;
   color: #fff;
   border: none;
   cursor: pointer;
@@ -289,23 +387,117 @@ button {
 }
 
 button:disabled {
-  background: #9ad6ac;
+  background: #3d5c48;
   cursor: not-allowed;
 }
 
 .download-button {
   margin-top: 1.5rem;
-  background: #fff;
-  color: #00c030;
-  border: 1px solid #00c030;
+  background: #e0e0e0;
+  color: #4a8f63;
+  border: 1px solid #4a8f63;
 }
 
 .download-button:hover {
-  background: #eafbef;
+  background: #cbe0d1;
+}
+
+.download-button-small {
+  font-size: 0.8rem;
+  padding: 0.4rem 0.6rem;
+}
+
+.all-matches-button {
+  background: transparent;
+  color: #4a8f63;
+  border: none;
+  font-size: 0.95rem;
+  font-weight: 400;
+  padding: 0;
+  align-self: center;
+  cursor: pointer;
+}
+
+.all-matches-button:disabled {
+  background: transparent;
+  color: #3d5c48;
+  cursor: not-allowed;
+}
+
+.all-matches-button:hover {
+  text-decoration: underline;
+}
+
+.picked-film {
+  margin-top: 1.5rem;
+  display: flex;
+  align-items: center;
+  gap: 1.25rem;
+  padding: 1.5rem;
+  border: 1px solid #4a8f63;
+  border-radius: 0.75rem;
+  background: #1a2620;
+}
+
+.picked-poster {
+  width: 7rem;
+  aspect-ratio: 2 / 3;
+  border-radius: 0.5rem;
+  object-fit: cover;
+  background: #242424;
+  flex-shrink: 0;
+}
+
+.picked-info {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.4rem;
+}
+
+.picked-label {
+  margin: 0;
+  font-size: 0.75rem;
+  color: #999;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.picked-title {
+  color: #e0e0e0;
+  font-size: 1.1rem;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.picked-title:hover {
+  color: #4a8f63;
 }
 
 .status {
   margin-top: 1.5rem;
+}
+
+.status.loading {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.spinner {
+  width: 1rem;
+  height: 1rem;
+  flex-shrink: 0;
+  border: 2px solid #2e3f34;
+  border-top-color: #4a8f63;
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .status.error {
@@ -316,18 +508,54 @@ button:disabled {
   list-style: none;
   padding: 0;
   margin-top: 1.5rem;
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1rem;
 }
 
 .results a {
-  color: #00c030;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  color: inherit;
   text-decoration: none;
-  font-weight: 500;
 }
 
-.results a:hover {
-  text-decoration: underline;
+.poster {
+  width: 100%;
+  aspect-ratio: 2 / 3;
+  border-radius: 0.4rem;
+  object-fit: cover;
+  background: #242424;
+}
+
+.poster-placeholder {
+  border: 1px solid #333;
+}
+
+.poster-title {
+  font-size: 0.8rem;
+  color: #e0e0e0;
+  text-align: center;
+  line-height: 1.3;
+}
+
+.results a:hover .poster-title {
+  color: #4a8f63;
+}
+
+.tmdb-attribution {
+  margin-top: 1.5rem;
+  font-size: 0.75rem;
+  color: #777;
+  text-align: center;
+}
+
+.tmdb-attribution a {
+  color: #777;
+}
+
+.tmdb-attribution a:hover {
+  color: #4a8f63;
 }
 </style>

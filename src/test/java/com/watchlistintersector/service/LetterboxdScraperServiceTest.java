@@ -12,8 +12,15 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 class LetterboxdScraperServiceTest {
 
+    private static final String ALICE_AVATAR_URL = "https://a.ltrbxd.com/resized/avatar/alice.jpg";
+
     private static final String PAGE_1_WITH_PAGINATION = """
             <html><body>
+              <section class="profile-header js-profile-header -is-mini-nav" data-person="Alice">
+                <div class="profile-mini-person -has-badge -longbadge">
+                  <a class="avatar -a24" href="/alice/"><img src="%s" alt="Alice" width="24" height="24" /></a>
+                </div>
+              </section>
               <div data-item-slug="dune-part-two" data-item-name="Dune: Part Two (2024)"
                    data-item-full-display-name="Dune: Part Two (2024)" class="poster">
                 <img alt="Dune: Part Two" src="empty-poster.jpg"/>
@@ -31,7 +38,7 @@ class LetterboxdScraperServiceTest {
                 </div>
               </div>
             </body></html>
-            """;
+            """.formatted(ALICE_AVATAR_URL);
 
     private static final String PAGE_2 = """
             <html><body>
@@ -165,6 +172,13 @@ class LetterboxdScraperServiceTest {
     }
 
     @Test
+    void checkUsernameExtractsAvatarUrlFromProfileHeader() {
+        UsernameCheck check = scraperService.checkUsername("alice");
+
+        assertThat(check.avatarUrl()).isEqualTo(ALICE_AVATAR_URL);
+    }
+
+    @Test
     void checkUsernameReportsUserExistsButWatchlistNotPublicWhenPageHasNoFilmTiles() {
         UsernameCheck check = scraperService.checkUsername("bob");
 
@@ -173,10 +187,18 @@ class LetterboxdScraperServiceTest {
     }
 
     @Test
+    void checkUsernameAvatarUrlIsNullWhenProfileHeaderIsMissing() {
+        UsernameCheck check = scraperService.checkUsername("bob");
+
+        assertThat(check.avatarUrl()).isNull();
+    }
+
+    @Test
     void checkUsernameReportsUserDoesNotExistOn404() {
         UsernameCheck check = scraperService.checkUsername("ghost");
 
         assertThat(check.userExists()).isFalse();
         assertThat(check.watchlistPublic()).isFalse();
+        assertThat(check.avatarUrl()).isNull();
     }
 }

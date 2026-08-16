@@ -4,3 +4,6 @@ services:
     env: docker
     plan: starter
     healthCheckPath: /
+    envVars:
+      - key: TMDB_API_KEY
+        sync: false

@@ -57,7 +57,7 @@ public class LetterboxdScraperService {
         try {
             Document firstPage = get(watchlistUrl(username, 1));
             boolean watchlistPublic = !firstPage.select("[data-item-slug]").isEmpty();
-            return UsernameCheck.existsWithWatchlist(watchlistPublic);
+            return UsernameCheck.existsWithWatchlist(watchlistPublic, extractAvatarUrl(firstPage));
         } catch (HttpStatusException e) {
             if (e.getStatusCode() != 404) {
                 log.warn("Unexpected status checking user '{}': {}", username, e.getMessage());
@@ -67,6 +67,20 @@ public class LetterboxdScraperService {
             log.warn("Failed to check username '{}': {}", username, e.getMessage());
             return UsernameCheck.notFound();
         }
+    }
+
+    /**
+     * The profile owner's avatar sits in the page header, same as film
+     * tiles it isn't behind Letterboxd's Cloudflare challenge, so it comes
+     * free with the watchlist page we already fetch. Null if the markup
+     * doesn't have it (e.g. a default/blank avatar with no img tag).
+     */
+    private String extractAvatarUrl(Document page) {
+        Element avatar = page.selectFirst(".profile-header a.avatar img");
+        if (avatar == null || avatar.attr("src").isBlank()) {
+            return null;
+        }
+        return avatar.attr("src");
     }
 
     public WatchlistResult fetchWatchlist(String username) {
