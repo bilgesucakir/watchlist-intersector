@@ -25,6 +25,6 @@ public class UserController {
         }
 
         UsernameCheck check = scraperService.checkUsername(username);
-        return ResponseEntity.ok(new UsernameCheckDto(check.userExists(), check.watchlistPublic()));
+        return ResponseEntity.ok(new UsernameCheckDto(check.userExists(), check.watchlistPublic(), check.avatarUrl()));
     }
 }

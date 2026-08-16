@@ -25,17 +25,19 @@ class UserControllerTest {
 
     @Test
     void returnsExistsTrueAndWatchlistPublicTrueForAPublicWatchlist() throws Exception {
-        when(scraperService.checkUsername(eq("alice"))).thenReturn(UsernameCheck.existsWithWatchlist(true));
+        when(scraperService.checkUsername(eq("alice")))
+                .thenReturn(UsernameCheck.existsWithWatchlist(true, "https://a.ltrbxd.com/resized/avatar/alice.jpg"));
 
         mockMvc.perform(get("/api/users/alice/exists"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.exists").value(true))
-                .andExpect(jsonPath("$.watchlistPublic").value(true));
+                .andExpect(jsonPath("$.watchlistPublic").value(true))
+                .andExpect(jsonPath("$.avatarUrl").value("https://a.ltrbxd.com/resized/avatar/alice.jpg"));
     }
 
     @Test
     void returnsExistsTrueAndWatchlistPublicFalseForAPrivateWatchlist() throws Exception {
-        when(scraperService.checkUsername(eq("bob"))).thenReturn(UsernameCheck.existsWithWatchlist(false));
+        when(scraperService.checkUsername(eq("bob"))).thenReturn(UsernameCheck.existsWithWatchlist(false, null));
 
         mockMvc.perform(get("/api/users/bob/exists"))
                 .andExpect(status().isOk())
@@ -50,6 +52,7 @@ class UserControllerTest {
         mockMvc.perform(get("/api/users/ghost/exists"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.exists").value(false))
-                .andExpect(jsonPath("$.watchlistPublic").value(false));
+                .andExpect(jsonPath("$.watchlistPublic").value(false))
+                .andExpect(jsonPath("$.avatarUrl").value(org.hamcrest.Matchers.nullValue()));
     }
 }

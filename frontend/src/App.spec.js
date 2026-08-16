@@ -43,25 +43,28 @@ describe('App', () => {
     await flushPromises()
   }
 
-  it('disables the submit button until both usernames are filled in and verified', async () => {
+  it('disables both search buttons until both usernames are filled in and verified', async () => {
     const wrapper = mount(App)
-    expect(wrapper.find('button').attributes('disabled')).toBeDefined()
+    expect(wrapper.find('button[type="submit"]').attributes('disabled')).toBeDefined()
+    expect(wrapper.find('.all-matches-button').attributes('disabled')).toBeDefined()
 
     await setUsernames(wrapper, 'alice', 'bob')
-    expect(wrapper.find('button').attributes('disabled')).toBeUndefined()
+    expect(wrapper.find('button[type="submit"]').attributes('disabled')).toBeUndefined()
+    expect(wrapper.find('.all-matches-button').attributes('disabled')).toBeUndefined()
   })
 
-  it('shows an error and keeps the button disabled when a username does not exist', async () => {
+  it('shows an error and keeps the buttons disabled when a username does not exist', async () => {
     existsResponses = { ghost: { exists: false, watchlistPublic: false } }
 
     const wrapper = mount(App)
     await setUsernames(wrapper, 'alice', 'ghost')
 
     expect(wrapper.text()).toContain("This username doesn't exist on Letterboxd.")
-    expect(wrapper.find('button').attributes('disabled')).toBeDefined()
+    expect(wrapper.find('button[type="submit"]').attributes('disabled')).toBeDefined()
+    expect(wrapper.find('.all-matches-button').attributes('disabled')).toBeDefined()
   })
 
-  it('shows a different error and keeps the button disabled when the watchlist is private', async () => {
+  it('shows a different error and keeps the buttons disabled when the watchlist is private', async () => {
     existsResponses = { bob: { exists: true, watchlistPublic: false } }
 
     const wrapper = mount(App)
@@ -69,7 +72,29 @@ describe('App', () => {
 
     expect(wrapper.text()).toContain("This user's watchlist isn't public, or is empty.")
     expect(wrapper.text()).not.toContain("doesn't exist")
-    expect(wrapper.find('button').attributes('disabled')).toBeDefined()
+    expect(wrapper.find('button[type="submit"]').attributes('disabled')).toBeDefined()
+  })
+
+  it('shows the avatar next to a field once its username is verified', async () => {
+    existsResponses = {
+      alice: { exists: true, watchlistPublic: true, avatarUrl: 'https://a.ltrbxd.com/resized/avatar/alice.jpg' }
+    }
+
+    const wrapper = mount(App)
+    await setUsernames(wrapper, 'alice', 'bob')
+
+    const avatars = wrapper.findAll('.avatar')
+    expect(avatars).toHaveLength(1)
+    expect(avatars[0].attributes('src')).toBe('https://a.ltrbxd.com/resized/avatar/alice.jpg')
+  })
+
+  it('does not show an avatar when the username check has no avatar url', async () => {
+    existsResponses = { ghost: { exists: false, watchlistPublic: false, avatarUrl: null } }
+
+    const wrapper = mount(App)
+    await setUsernames(wrapper, 'alice', 'ghost')
+
+    expect(wrapper.findAll('.avatar')).toHaveLength(0)
   })
 
   it('debounces the existence check while typing', async () => {
@@ -104,7 +129,7 @@ describe('App', () => {
     const wrapper = mount(App)
     await setUsernames(wrapper, 'alice', 'alice')
 
-    expect(wrapper.find('button').attributes('disabled')).toBeUndefined()
+    expect(wrapper.find('button[type="submit"]').attributes('disabled')).toBeUndefined()
 
     await wrapper.find('form').trigger('submit')
     await flushPromises()
@@ -113,18 +138,118 @@ describe('App', () => {
     expect(global.fetch).not.toHaveBeenCalledWith(expect.stringMatching(/^\/api\/intersect/))
   })
 
-  it('requests the intersection and renders matches on success', async () => {
+  it('the primary action requests a single random pick and shows it highlighted', async () => {
     intersectImpl = () =>
-      jsonResponse([{ title: 'Anora', url: 'https://letterboxd.com/film/anora/' }])
+      jsonResponse([
+        {
+          title: 'Anora',
+          url: 'https://letterboxd.com/film/anora/',
+          posterUrl: 'https://image.tmdb.org/t/p/w342/anora.jpg'
+        }
+      ])
 
     const wrapper = mount(App)
     await setUsernames(wrapper, 'alice', 'bob')
     await wrapper.find('form').trigger('submit')
     await flushPromises()
 
+    expect(global.fetch).toHaveBeenCalledWith('/api/intersect?user1=alice&user2=bob&random=true')
+    expect(wrapper.find('.picked-title').text()).toBe('Anora')
+    expect(wrapper.find('.picked-title').attributes('href')).toBe('https://letterboxd.com/film/anora/')
+    expect(wrapper.find('.picked-poster').attributes('src')).toBe('https://image.tmdb.org/t/p/w342/anora.jpg')
+    expect(wrapper.text()).toContain('TMDB')
+    expect(wrapper.find('.results').exists()).toBe(false)
+  })
+
+  it('shows a placeholder poster for the tonight pick when there is no poster', async () => {
+    intersectImpl = () =>
+      jsonResponse([{ title: 'Anora', url: 'https://letterboxd.com/film/anora/', posterUrl: null }])
+
+    const wrapper = mount(App)
+    await setUsernames(wrapper, 'alice', 'bob')
+    await wrapper.find('form').trigger('submit')
+    await flushPromises()
+
+    expect(wrapper.find('img.picked-poster').exists()).toBe(false)
+    expect(wrapper.find('.picked-poster.poster-placeholder').exists()).toBe(true)
+  })
+
+  it('clicking the primary button again requests a fresh random pick (no dedicated reroll button)', async () => {
+    let callCount = 0
+    intersectImpl = () => {
+      callCount += 1
+      return jsonResponse([
+        {
+          title: callCount === 1 ? 'Anora' : 'Dune: Part Two',
+          url: 'https://letterboxd.com/film/anora/',
+          posterUrl: null
+        }
+      ])
+    }
+
+    const wrapper = mount(App)
+    await setUsernames(wrapper, 'alice', 'bob')
+    await wrapper.find('form').trigger('submit')
+    await flushPromises()
+    expect(wrapper.find('.picked-title').text()).toBe('Anora')
+    expect(wrapper.find('.reroll-button').exists()).toBe(false)
+
+    await wrapper.find('form').trigger('submit')
+    await flushPromises()
+
+    expect(wrapper.find('.picked-title').text()).toBe('Dune: Part Two')
+    expect(global.fetch).toHaveBeenCalledWith('/api/intersect?user1=alice&user2=bob&random=true')
+  })
+
+  it('requests all matches and renders the poster grid when the secondary button is clicked', async () => {
+    intersectImpl = () =>
+      jsonResponse([
+        {
+          title: 'Anora',
+          url: 'https://letterboxd.com/film/anora/',
+          posterUrl: 'https://image.tmdb.org/t/p/w342/anora.jpg'
+        }
+      ])
+
+    const wrapper = mount(App)
+    await setUsernames(wrapper, 'alice', 'bob')
+    await wrapper.find('.all-matches-button').trigger('click')
+    await flushPromises()
+
     expect(global.fetch).toHaveBeenCalledWith('/api/intersect?user1=alice&user2=bob')
-    expect(wrapper.text()).toContain('Anora')
     expect(wrapper.find('.results a').attributes('href')).toBe('https://letterboxd.com/film/anora/')
+    expect(wrapper.find('.poster').attributes('src')).toBe('https://image.tmdb.org/t/p/w342/anora.jpg')
+    expect(wrapper.find('.picked-film').exists()).toBe(false)
+  })
+
+  it('shows a placeholder instead of an img in the grid when a match has no poster', async () => {
+    intersectImpl = () =>
+      jsonResponse([{ title: 'Anora', url: 'https://letterboxd.com/film/anora/', posterUrl: null }])
+
+    const wrapper = mount(App)
+    await setUsernames(wrapper, 'alice', 'bob')
+    await wrapper.find('.all-matches-button').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('img.poster').exists()).toBe(false)
+    expect(wrapper.find('.poster-placeholder').exists()).toBe(true)
+  })
+
+  it('switches from the tonight-pick view to the full grid when all matches is requested next', async () => {
+    intersectImpl = () =>
+      jsonResponse([{ title: 'Anora', url: 'https://letterboxd.com/film/anora/', posterUrl: null }])
+
+    const wrapper = mount(App)
+    await setUsernames(wrapper, 'alice', 'bob')
+    await wrapper.find('form').trigger('submit')
+    await flushPromises()
+    expect(wrapper.find('.picked-film').exists()).toBe(true)
+
+    await wrapper.find('.all-matches-button').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('.picked-film').exists()).toBe(false)
+    expect(wrapper.find('.results').exists()).toBe(true)
   })
 
   it('does not show a download button when there are no matches', async () => {
@@ -132,7 +257,7 @@ describe('App', () => {
 
     const wrapper = mount(App)
     await setUsernames(wrapper, 'alice', 'bob')
-    await wrapper.find('form').trigger('submit')
+    await wrapper.find('.all-matches-button').trigger('click')
     await flushPromises()
 
     expect(wrapper.find('.download-button').exists()).toBe(false)
@@ -164,7 +289,7 @@ describe('App', () => {
 
     const wrapper = mount(App)
     await setUsernames(wrapper, 'alice', 'bob')
-    await wrapper.find('form').trigger('submit')
+    await wrapper.find('.all-matches-button').trigger('click')
     await flushPromises()
 
     await wrapper.find('.download-button').trigger('click')
