@@ -14,6 +14,8 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Executor;
+import java.util.concurrent.Executors;
 import java.util.stream.Collectors;
 
 @RestController
@@ -22,6 +24,14 @@ public class IntersectController {
     private static final String FILM_URL_TEMPLATE = "https://letterboxd.com/film/%s/";
 
     private final LetterboxdScraperService scraperService;
+
+    /**
+     * Dedicated executor so the two watchlist fetches run truly in parallel.
+     * ForkJoinPool.commonPool() sizes itself off availableProcessors(), which
+     * on a constrained host (e.g. a fractional-vCPU container) can report 1
+     * and silently serialize both fetches instead of running them concurrently.
+     */
+    private final Executor watchlistFetchExecutor = Executors.newVirtualThreadPerTaskExecutor();
 
     public IntersectController(LetterboxdScraperService scraperService) {
         this.scraperService = scraperService;
@@ -34,9 +44,9 @@ public class IntersectController {
         }
 
         CompletableFuture<WatchlistResult> future1 =
-                CompletableFuture.supplyAsync(() -> scraperService.fetchWatchlist(user1));
+                CompletableFuture.supplyAsync(() -> scraperService.fetchWatchlist(user1), watchlistFetchExecutor);
         CompletableFuture<WatchlistResult> future2 =
-                CompletableFuture.supplyAsync(() -> scraperService.fetchWatchlist(user2));
+                CompletableFuture.supplyAsync(() -> scraperService.fetchWatchlist(user2), watchlistFetchExecutor);
 
         WatchlistResult result1 = future1.join();
         WatchlistResult result2 = future2.join();
