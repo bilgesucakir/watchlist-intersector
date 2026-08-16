@@ -127,6 +127,54 @@ describe('App', () => {
     expect(wrapper.find('.results a').attributes('href')).toBe('https://letterboxd.com/film/anora/')
   })
 
+  it('does not show a download button when there are no matches', async () => {
+    intersectImpl = () => jsonResponse([])
+
+    const wrapper = mount(App)
+    await setUsernames(wrapper, 'alice', 'bob')
+    await wrapper.find('form').trigger('submit')
+    await flushPromises()
+
+    expect(wrapper.find('.download-button').exists()).toBe(false)
+  })
+
+  it('downloads a CSV with year in its own column and a user1_user2 filename', async () => {
+    intersectImpl = () =>
+      jsonResponse([
+        { title: 'The Godfather (1972)', url: 'https://letterboxd.com/film/the-godfather/', year: 1972 },
+        { title: 'Parasite (2019)', url: 'https://letterboxd.com/film/parasite/', year: 2019 }
+      ])
+
+    const OriginalBlob = global.Blob
+    let capturedParts = null
+    global.Blob = vi.fn((parts, options) => {
+      capturedParts = parts
+      return new OriginalBlob(parts, options)
+    })
+    URL.createObjectURL = vi.fn(() => 'blob:mock-url')
+    URL.revokeObjectURL = vi.fn()
+
+    const originalCreateElement = document.createElement.bind(document)
+    let createdAnchor = null
+    vi.spyOn(document, 'createElement').mockImplementation((tag) => {
+      const el = originalCreateElement(tag)
+      if (tag === 'a') createdAnchor = el
+      return el
+    })
+
+    const wrapper = mount(App)
+    await setUsernames(wrapper, 'alice', 'bob')
+    await wrapper.find('form').trigger('submit')
+    await flushPromises()
+
+    await wrapper.find('.download-button').trigger('click')
+
+    expect(createdAnchor.download).toBe('alice_bob_watchlist_intersection.csv')
+    expect(capturedParts[0]).toBe('Title,Year\r\nThe Godfather,1972\r\nParasite,2019')
+
+    global.Blob = OriginalBlob
+  })
+
   it('shows the server error message when a watchlist is inaccessible', async () => {
     intersectImpl = () => jsonResponse({ error: 'Watchlist inaccessible for: bob' }, false)
 

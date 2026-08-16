@@ -10,6 +10,12 @@ const error = ref('')
 const matches = ref(null)
 const sameUsernameError = ref(false)
 
+// Usernames the current `matches` results actually came from, captured at
+// search time so the CSV filename stays correct even if the inputs are
+// edited afterward without re-searching.
+const searchedUser1 = ref('')
+const searchedUser2 = ref('')
+
 // Each is null until checked (empty field, or check still pending), then true/false.
 // watchlistPublic is only meaningful once exists is true.
 const user1Exists = ref(null)
@@ -99,11 +105,43 @@ async function findMatches() {
     }
 
     matches.value = body
+    searchedUser1.value = u1
+    searchedUser2.value = u2
   } catch (e) {
     error.value = 'Could not reach the server. Please try again.'
   } finally {
     loading.value = false
   }
+}
+
+// Letterboxd's list-import CSV matches by title text, so the year needs to
+// come from its own column rather than staying baked into "Title (Year)" —
+// confirmed by test-importing a CSV built this way.
+function csvTitle(title) {
+  return title.replace(/\s*\(\d{4}\)\s*$/, '')
+}
+
+function csvEscape(value) {
+  const text = String(value ?? '')
+  return /[",\r\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text
+}
+
+function downloadCsv() {
+  const rows = [
+    ['Title', 'Year'],
+    ...matches.value.map((film) => [csvTitle(film.title), film.year ?? ''])
+  ]
+  const csvContent = rows.map((row) => row.map(csvEscape).join(',')).join('\r\n')
+
+  const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' })
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = `${searchedUser1.value}_${searchedUser2.value}_watchlist_intersection.csv`
+  document.body.appendChild(link)
+  link.click()
+  document.body.removeChild(link)
+  URL.revokeObjectURL(url)
 }
 </script>
 
@@ -170,11 +208,14 @@ async function findMatches() {
 
     <template v-if="matches !== null && !loading">
       <p v-if="matches.length === 0" class="status">No films in common.</p>
-      <ul v-else class="results">
-        <li v-for="film in matches" :key="film.url">
-          <a :href="film.url" target="_blank" rel="noopener noreferrer">{{ film.title }}</a>
-        </li>
-      </ul>
+      <template v-else>
+        <button type="button" class="download-button" @click="downloadCsv">Download CSV</button>
+        <ul class="results">
+          <li v-for="film in matches" :key="film.url">
+            <a :href="film.url" target="_blank" rel="noopener noreferrer">{{ film.title }}</a>
+          </li>
+        </ul>
+      </template>
     </template>
   </main>
 </template>
@@ -250,6 +291,17 @@ button {
 button:disabled {
   background: #9ad6ac;
   cursor: not-allowed;
+}
+
+.download-button {
+  margin-top: 1.5rem;
+  background: #fff;
+  color: #00c030;
+  border: 1px solid #00c030;
+}
+
+.download-button:hover {
+  background: #eafbef;
 }
 
 .status {
