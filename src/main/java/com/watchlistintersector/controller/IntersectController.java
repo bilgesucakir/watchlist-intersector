@@ -66,12 +66,15 @@ public class IntersectController {
     }
 
     private List<FilmMatchDto> intersect(WatchlistResult result1, WatchlistResult result2) {
-        Map<String, String> titlesBySlug = result1.films().stream()
-                .collect(Collectors.toMap(Film::slug, Film::title, (a, b) -> a));
+        Map<String, Film> filmsBySlug = result1.films().stream()
+                .collect(Collectors.toMap(Film::slug, film -> film, (a, b) -> a));
 
         return result2.films().stream()
-                .filter(film -> titlesBySlug.containsKey(film.slug()))
-                .map(film -> new FilmMatchDto(titlesBySlug.get(film.slug()), FILM_URL_TEMPLATE.formatted(film.slug())))
+                .filter(film -> filmsBySlug.containsKey(film.slug()))
+                .map(film -> {
+                    Film matched = filmsBySlug.get(film.slug());
+                    return new FilmMatchDto(matched.title(), FILM_URL_TEMPLATE.formatted(matched.slug()), matched.year());
+                })
                 .sorted(Comparator.comparing(FilmMatchDto::title, String.CASE_INSENSITIVE_ORDER))
                 .toList();
     }

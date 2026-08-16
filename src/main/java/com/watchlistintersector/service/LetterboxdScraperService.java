@@ -2,6 +2,7 @@ package com.watchlistintersector.service;
 
 import com.watchlistintersector.model.Film;
 import org.jsoup.Connection;
+import org.jsoup.HttpStatusException;
 import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
@@ -28,6 +29,7 @@ public class LetterboxdScraperService {
 
     private static final int REQUEST_TIMEOUT_MS = 10_000;
     private static final Pattern PAGE_NUMBER_PATTERN = Pattern.compile("/page/(\\d+)/?$");
+    private static final Pattern YEAR_PATTERN = Pattern.compile("\\((\\d{4})\\)\\s*$");
 
     private final String baseUrl;
     private final long delayBetweenPagesMs;
@@ -37,6 +39,34 @@ public class LetterboxdScraperService {
             @Value("${letterboxd.page-delay-ms:250}") long delayBetweenPagesMs) {
         this.baseUrl = baseUrl;
         this.delayBetweenPagesMs = delayBetweenPagesMs;
+    }
+
+    /**
+     * Cheap existence/accessibility check: fetches only page 1, without
+     * walking pagination. Used to validate a username before committing to a
+     * full {@link #fetchWatchlist} scrape.
+     *
+     * Letterboxd's Cloudflare protection challenges the plain profile page
+     * ({@code /{username}/}) even for real users, so it can't be scraped
+     * directly to check existence. The watchlist page isn't challenged and
+     * already carries both signals: a 404 means the username doesn't exist,
+     * while a 200 with no film tiles means the user exists but their
+     * watchlist isn't public (or is simply empty).
+     */
+    public UsernameCheck checkUsername(String username) {
+        try {
+            Document firstPage = get(watchlistUrl(username, 1));
+            boolean watchlistPublic = !firstPage.select("[data-item-slug]").isEmpty();
+            return UsernameCheck.existsWithWatchlist(watchlistPublic);
+        } catch (HttpStatusException e) {
+            if (e.getStatusCode() != 404) {
+                log.warn("Unexpected status checking user '{}': {}", username, e.getMessage());
+            }
+            return UsernameCheck.notFound();
+        } catch (IOException e) {
+            log.warn("Failed to check username '{}': {}", username, e.getMessage());
+            return UsernameCheck.notFound();
+        }
     }
 
     public WatchlistResult fetchWatchlist(String username) {
@@ -85,9 +115,21 @@ public class LetterboxdScraperService {
             if (slug.isBlank()) {
                 continue;
             }
-            films.add(new Film(slug, extractTitle(tile, slug)));
+            String title = extractTitle(tile, slug);
+            films.add(new Film(slug, title, extractYear(title)));
         }
         return films;
+    }
+
+    /**
+     * Parses the release year out of a title's trailing "(YYYY)", which is
+     * how Letterboxd formats it. Not derived from the slug: slugs are
+     * sometimes suffixed with a disambiguation year that differs from the
+     * film's actual release year (re-releases, regional premieres).
+     */
+    private Integer extractYear(String title) {
+        Matcher matcher = YEAR_PATTERN.matcher(title);
+        return matcher.find() ? Integer.parseInt(matcher.group(1)) : null;
     }
 
     /**

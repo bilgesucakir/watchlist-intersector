@@ -1,5 +1,7 @@
 <script setup>
-import { ref, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
+
+const USERNAME_CHECK_DEBOUNCE_MS = 500
 
 const user1 = ref('')
 const user2 = ref('')
@@ -8,8 +10,65 @@ const error = ref('')
 const matches = ref(null)
 const sameUsernameError = ref(false)
 
+// Each is null until checked (empty field, or check still pending), then true/false.
+// watchlistPublic is only meaningful once exists is true.
+const user1Exists = ref(null)
+const user2Exists = ref(null)
+const user1WatchlistPublic = ref(null)
+const user2WatchlistPublic = ref(null)
+
 const hasEmptyField = computed(() => !user1.value.trim() || !user2.value.trim())
-const canSubmit = computed(() => !hasEmptyField.value && !loading.value)
+const canSubmit = computed(
+  () =>
+    !hasEmptyField.value &&
+    user1WatchlistPublic.value === true &&
+    user2WatchlistPublic.value === true &&
+    !loading.value
+)
+
+const user1Error = computed(() => usernameFieldError(user1Exists.value, user1WatchlistPublic.value))
+const user2Error = computed(() => usernameFieldError(user2Exists.value, user2WatchlistPublic.value))
+
+function usernameFieldError(exists, watchlistPublic) {
+  if (exists === false) return "This username doesn't exist on Letterboxd."
+  if (exists === true && watchlistPublic === false) return "This user's watchlist isn't public."
+  return null
+}
+
+async function checkUsername(username) {
+  try {
+    const response = await fetch(`/api/users/${encodeURIComponent(username)}/exists`)
+    if (!response.ok) return { exists: false, watchlistPublic: false }
+    const body = await response.json()
+    return { exists: body.exists === true, watchlistPublic: body.watchlistPublic === true }
+  } catch (e) {
+    return { exists: false, watchlistPublic: false }
+  }
+}
+
+function watchUsername(usernameRef, existsRef, watchlistPublicRef) {
+  let timer = null
+  watch(usernameRef, (value) => {
+    clearTimeout(timer)
+    const trimmed = value.trim()
+    existsRef.value = null
+    watchlistPublicRef.value = null
+
+    if (!trimmed) return
+
+    timer = setTimeout(async () => {
+      const result = await checkUsername(trimmed)
+      // Ignore stale responses if the field changed again while this was in flight.
+      if (usernameRef.value.trim() === trimmed) {
+        existsRef.value = result.exists
+        watchlistPublicRef.value = result.watchlistPublic
+      }
+    }, USERNAME_CHECK_DEBOUNCE_MS)
+  })
+}
+
+watchUsername(user1, user1Exists, user1WatchlistPublic)
+watchUsername(user2, user2Exists, user2WatchlistPublic)
 
 async function findMatches() {
   error.value = ''
@@ -49,25 +108,52 @@ async function findMatches() {
 </script>
 
 <template>
+  <a
+    class="github-link"
+    href="https://github.com/bilgesucakir/watchlist-intersector"
+    target="_blank"
+    rel="noopener noreferrer"
+  >
+    <svg viewBox="0 0 16 16" width="20" height="20" fill="currentColor" aria-hidden="true">
+      <path
+        d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38
+        0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13
+        -.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66
+        .07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15
+        -.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0
+        1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82
+        1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01
+        1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0 0 16 8c0-4.42-3.58-8-8-8z"
+      />
+    </svg>
+    <span>watchlist-intersector on GitHub</span>
+  </a>
+
   <main class="page">
     <h1>Watchlist Intersector</h1>
     <p class="subtitle">Find films on both Letterboxd users' watchlists.</p>
 
     <form class="form" @submit.prevent="findMatches">
-      <input
-        v-model="user1"
-        type="text"
-        placeholder="Letterboxd username 1"
-        :disabled="loading"
-        autocomplete="off"
-      />
-      <input
-        v-model="user2"
-        type="text"
-        placeholder="Letterboxd username 2"
-        :disabled="loading"
-        autocomplete="off"
-      />
+      <div class="field">
+        <input
+          v-model="user1"
+          type="text"
+          placeholder="Letterboxd username 1"
+          :disabled="loading"
+          autocomplete="off"
+        />
+        <p v-if="user1Error" class="field-error">{{ user1Error }}</p>
+      </div>
+      <div class="field">
+        <input
+          v-model="user2"
+          type="text"
+          placeholder="Letterboxd username 2"
+          :disabled="loading"
+          autocomplete="off"
+        />
+        <p v-if="user2Error" class="field-error">{{ user2Error }}</p>
+      </div>
       <button type="submit" :disabled="!canSubmit">
         {{ loading ? 'Searching…' : 'Find matches' }}
       </button>
@@ -94,6 +180,22 @@ async function findMatches() {
 </template>
 
 <style scoped>
+.github-link {
+  position: fixed;
+  top: 1rem;
+  right: 1rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  color: #333;
+  font-size: 0.9rem;
+  text-decoration: none;
+}
+
+.github-link:hover {
+  color: #00c030;
+}
+
 .page {
   max-width: 32rem;
   margin: 3rem auto;
@@ -115,6 +217,18 @@ h1 {
   display: flex;
   flex-direction: column;
   gap: 0.75rem;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.field-error {
+  margin: 0;
+  font-size: 0.85rem;
+  color: #c0392b;
 }
 
 input,
