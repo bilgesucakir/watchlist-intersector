@@ -14,10 +14,7 @@ import java.util.List;
 import java.util.regex.Pattern;
 
 /**
- * Best-effort poster lookup via TMDB (themoviedb.org). Letterboxd's own
- * poster images are lazy-loaded per-film through an endpoint behind the same
- * Cloudflare challenge that blocks the profile page, so they aren't scrapable
- * the way the rest of this app works; TMDB is a public, keyed API instead.
+ * Looks up film poster images from the TMDB (themoviedb.org) API.
  */
 @Service
 public class TmdbPosterService {
@@ -44,9 +41,10 @@ public class TmdbPosterService {
     }
 
     /**
-     * Returns null (no poster shown) if the API key isn't configured, TMDB
-     * has no match, or the request fails for any reason -- a missing poster
-     * should never break the intersection itself.
+     * @param title the film's title; a trailing "(YYYY)" is stripped before searching
+     * @param year  the film's release year, used to narrow the search; may be {@code null}
+     * @return the poster image URL, or {@code null} if no API key is configured, TMDB
+     *         has no match, or the request fails
      */
     public String findPosterUrl(String title, Integer year) {
         if (apiKey.isBlank()) {

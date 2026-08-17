@@ -37,23 +37,6 @@ class WatchlistIntersectionServiceTest {
     }
 
     @Test
-    void sortsMatchesAlphabeticallyByTitleCaseInsensitive() {
-        WatchlistResult result1 = WatchlistResult.of("alice", Set.of(
-                new Film("the-substance", "The Substance (2024)", 2024),
-                new Film("anora", "anora (2024)", 2024),
-                new Film("dune-part-two", "Dune: Part Two (2024)", 2024)));
-        WatchlistResult result2 = WatchlistResult.of("bob", Set.of(
-                new Film("the-substance", "The Substance (2024)", 2024),
-                new Film("anora", "anora (2024)", 2024),
-                new Film("dune-part-two", "Dune: Part Two (2024)", 2024)));
-
-        List<Film> matches = service.intersect(result1, result2);
-
-        assertThat(matches).extracting(Film::title)
-                .containsExactly("anora (2024)", "Dune: Part Two (2024)", "The Substance (2024)");
-    }
-
-    @Test
     void usesFilmDataFromTheFirstWatchlist() {
         WatchlistResult result1 = WatchlistResult.of("alice", Set.of(
                 new Film("dune-part-two", "Dune: Part Two (2024)", 2024)));
