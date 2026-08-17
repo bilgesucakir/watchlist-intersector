@@ -3,53 +3,56 @@ package com.watchlistintersector.controller;
 import com.watchlistintersector.controller.dto.ErrorResponseDto;
 import com.watchlistintersector.controller.dto.FilmMatchDto;
 import com.watchlistintersector.model.Film;
+import com.watchlistintersector.service.FilmResponseService;
 import com.watchlistintersector.service.LetterboxdScraperService;
-import com.watchlistintersector.service.TmdbPosterService;
 import com.watchlistintersector.service.WatchlistIntersectionService;
 import com.watchlistintersector.service.WatchlistResult;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.Parameter;
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
-import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
-import java.util.concurrent.Executors;
-import java.util.concurrent.ThreadLocalRandom;
 
+/**
+ * Finds films present on both of two Letterboxd users' watchlists.
+ */
 @RestController
 public class IntersectController {
 
-    private static final String FILM_URL_TEMPLATE = "https://letterboxd.com/film/%s/";
-
     private final LetterboxdScraperService scraperService;
     private final WatchlistIntersectionService intersectionService;
-    private final TmdbPosterService posterService;
-
-    /**
-     * Dedicated executor so the two watchlist fetches -- and, further down,
-     * the per-film poster lookups -- run truly in parallel. ForkJoinPool
-     * .commonPool() sizes itself off availableProcessors(), which on a
-     * constrained host (e.g. a fractional-vCPU container) can report 1 and
-     * silently serialize everything instead of running it concurrently.
-     */
-    private final Executor ioExecutor = Executors.newVirtualThreadPerTaskExecutor();
+    private final FilmResponseService filmResponseService;
+    private final Executor ioExecutor;
 
     public IntersectController(
             LetterboxdScraperService scraperService,
             WatchlistIntersectionService intersectionService,
-            TmdbPosterService posterService) {
+            FilmResponseService filmResponseService,
+            @Qualifier("ioExecutor") Executor ioExecutor) {
         this.scraperService = scraperService;
         this.intersectionService = intersectionService;
-        this.posterService = posterService;
+        this.filmResponseService = filmResponseService;
+        this.ioExecutor = ioExecutor;
     }
 
+    @Operation(
+            summary = "Find films on both users' watchlists",
+            description = "Returns every film present on both users' public watchlists, or a single random pick."
+    )
+    @ApiResponse(responseCode = "200", description = "The matching films, or a single random pick")
+    @ApiResponse(responseCode = "400", description = "A username is blank, doesn't exist, or its watchlist is private")
     @GetMapping("/api/intersect")
     public ResponseEntity<?> intersect(
-            @RequestParam String user1,
-            @RequestParam String user2,
+            @Parameter(description = "First Letterboxd username") @RequestParam String user1,
+            @Parameter(description = "Second Letterboxd username") @RequestParam String user2,
+            @Parameter(description = "Return a single random film instead of the full overlap")
             @RequestParam(defaultValue = "false") boolean random) {
         if (user1.isBlank() || user2.isBlank()) {
             return ResponseEntity.badRequest().body(new ErrorResponseDto("Both user1 and user2 are required."));
@@ -74,31 +77,8 @@ public class IntersectController {
         }
 
         List<Film> matchedFilms = intersectionService.intersect(result1, result2);
-
-        // In random mode, only the one film we're actually returning needs a
-        // poster lookup -- no point spending TMDB calls on films we're not
-        // going to show.
-        List<Film> filmsToReturn = random ? pickOneRandomFilm(matchedFilms).map(List::of).orElseGet(List::of) : matchedFilms;
-
-        List<FilmMatchDto> matches = filmsToReturn.stream()
-                .map(film -> CompletableFuture.supplyAsync(() -> toDto(film), ioExecutor))
-                .toList()
-                .stream()
-                .map(CompletableFuture::join)
-                .toList();
+        List<FilmMatchDto> matches = filmResponseService.toDtos(matchedFilms, random);
 
         return ResponseEntity.ok(matches);
-    }
-
-    private Optional<Film> pickOneRandomFilm(List<Film> films) {
-        if (films.isEmpty()) {
-            return Optional.empty();
-        }
-        return Optional.of(films.get(ThreadLocalRandom.current().nextInt(films.size())));
-    }
-
-    private FilmMatchDto toDto(Film film) {
-        String posterUrl = posterService.findPosterUrl(film.title(), film.year());
-        return new FilmMatchDto(film.title(), FILM_URL_TEMPLATE.formatted(film.slug()), film.year(), posterUrl);
     }
 }

@@ -3,7 +3,6 @@ package com.watchlistintersector.service;
 import com.watchlistintersector.model.Film;
 import org.springframework.stereotype.Service;
 
-import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -12,9 +11,10 @@ import java.util.stream.Collectors;
 public class WatchlistIntersectionService {
 
     /**
-     * Films present on both watchlists, sorted alphabetically by title.
-     * Title/year come from result1's copy of the film when both users have
-     * it (the two should always agree, since it's the same Letterboxd page).
+     * @param result1 the first user's watchlist
+     * @param result2 the second user's watchlist
+     * @return the films present on both, in no particular order, using each film's
+     *         title and year from {@code result1}
      */
     public List<Film> intersect(WatchlistResult result1, WatchlistResult result2) {
         Map<String, Film> filmsBySlug = result1.films().stream()
@@ -23,7 +23,6 @@ public class WatchlistIntersectionService {
         return result2.films().stream()
                 .filter(film -> filmsBySlug.containsKey(film.slug()))
                 .map(film -> filmsBySlug.get(film.slug()))
-                .sorted(Comparator.comparing(Film::title, String.CASE_INSENSITIVE_ORDER))
                 .toList();
     }
 }

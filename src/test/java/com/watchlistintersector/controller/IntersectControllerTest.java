@@ -1,8 +1,10 @@
 package com.watchlistintersector.controller;
 
+import com.watchlistintersector.config.AsyncConfig;
+import com.watchlistintersector.controller.dto.FilmMatchDto;
 import com.watchlistintersector.model.Film;
+import com.watchlistintersector.service.FilmResponseService;
 import com.watchlistintersector.service.LetterboxdScraperService;
-import com.watchlistintersector.service.TmdbPosterService;
 import com.watchlistintersector.service.WatchlistIntersectionService;
 import com.watchlistintersector.service.WatchlistResult;
 import org.junit.jupiter.api.Test;
@@ -12,11 +14,11 @@ import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.context.annotation.Import;
 import org.springframework.test.web.servlet.MockMvc;
 
+import java.util.List;
 import java.util.Set;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -24,7 +26,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 @WebMvcTest(IntersectController.class)
-@Import(WatchlistIntersectionService.class)
+@Import({WatchlistIntersectionService.class, AsyncConfig.class})
 class IntersectControllerTest {
 
     @Autowired
@@ -34,18 +36,19 @@ class IntersectControllerTest {
     private LetterboxdScraperService scraperService;
 
     @MockBean
-    private TmdbPosterService posterService;
+    private FilmResponseService filmResponseService;
 
     @Test
-    void returnsOnlyFilmsPresentOnBothWatchlists() throws Exception {
+    void returnsWhateverFilmResponseServiceProducesForTheIntersection() throws Exception {
         when(scraperService.fetchWatchlist(eq("alice"))).thenReturn(WatchlistResult.of("alice", Set.of(
                 new Film("dune-part-two", "Dune: Part Two (2024)", 2024),
                 new Film("anora", "Anora (2024)", 2024))));
         when(scraperService.fetchWatchlist(eq("bob"))).thenReturn(WatchlistResult.of("bob", Set.of(
                 new Film("dune-part-two", "Dune: Part Two (2024)", 2024),
                 new Film("the-substance", "The Substance (2024)", 2024))));
-        when(posterService.findPosterUrl(eq("Dune: Part Two (2024)"), eq(2024)))
-                .thenReturn("https://image.tmdb.org/t/p/w342/poster.jpg");
+        when(filmResponseService.toDtos(any(), eq(false))).thenReturn(List.of(
+                new FilmMatchDto("Dune: Part Two (2024)", "https://letterboxd.com/film/dune-part-two/", 2024,
+                        "https://image.tmdb.org/t/p/w342/poster.jpg")));
 
         mockMvc.perform(get("/api/intersect").param("user1", "alice").param("user2", "bob"))
                 .andExpect(status().isOk())
@@ -57,16 +60,34 @@ class IntersectControllerTest {
     }
 
     @Test
-    void returnsNullPosterUrlWhenTmdbHasNoMatch() throws Exception {
+    void onlyPassesFilmsPresentOnBothWatchlistsToFilmResponseService() throws Exception {
+        when(scraperService.fetchWatchlist(eq("alice"))).thenReturn(WatchlistResult.of("alice", Set.of(
+                new Film("dune-part-two", "Dune: Part Two (2024)", 2024),
+                new Film("anora", "Anora (2024)", 2024))));
+        when(scraperService.fetchWatchlist(eq("bob"))).thenReturn(WatchlistResult.of("bob", Set.of(
+                new Film("dune-part-two", "Dune: Part Two (2024)", 2024),
+                new Film("the-substance", "The Substance (2024)", 2024))));
+        when(filmResponseService.toDtos(any(), eq(false))).thenReturn(List.of());
+
+        mockMvc.perform(get("/api/intersect").param("user1", "alice").param("user2", "bob"))
+                .andExpect(status().isOk());
+
+        verify(filmResponseService).toDtos(
+                eq(List.of(new Film("dune-part-two", "Dune: Part Two (2024)", 2024))), eq(false));
+    }
+
+    @Test
+    void passesRandomFlagThroughToFilmResponseService() throws Exception {
         when(scraperService.fetchWatchlist(eq("alice"))).thenReturn(WatchlistResult.of("alice", Set.of(
                 new Film("dune-part-two", "Dune: Part Two (2024)", 2024))));
         when(scraperService.fetchWatchlist(eq("bob"))).thenReturn(WatchlistResult.of("bob", Set.of(
                 new Film("dune-part-two", "Dune: Part Two (2024)", 2024))));
-        when(posterService.findPosterUrl(any(), any())).thenReturn(null);
+        when(filmResponseService.toDtos(any(), eq(true))).thenReturn(List.of());
 
-        mockMvc.perform(get("/api/intersect").param("user1", "alice").param("user2", "bob"))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$[0].posterUrl").value(org.hamcrest.Matchers.nullValue()));
+        mockMvc.perform(get("/api/intersect").param("user1", "alice").param("user2", "bob").param("random", "true"))
+                .andExpect(status().isOk());
+
+        verify(filmResponseService).toDtos(any(), eq(true));
     }
 
     @Test
@@ -75,53 +96,9 @@ class IntersectControllerTest {
                 new Film("dune-part-two", "Dune: Part Two (2024)", 2024))));
         when(scraperService.fetchWatchlist(eq("bob"))).thenReturn(WatchlistResult.of("bob", Set.of(
                 new Film("anora", "Anora (2024)", 2024))));
+        when(filmResponseService.toDtos(eq(List.of()), eq(false))).thenReturn(List.of());
 
         mockMvc.perform(get("/api/intersect").param("user1", "alice").param("user2", "bob"))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.length()").value(0));
-    }
-
-    @Test
-    void randomModeReturnsExactlyOneMatch() throws Exception {
-        when(scraperService.fetchWatchlist(eq("alice"))).thenReturn(WatchlistResult.of("alice", Set.of(
-                new Film("dune-part-two", "Dune: Part Two (2024)", 2024),
-                new Film("anora", "Anora (2024)", 2024))));
-        when(scraperService.fetchWatchlist(eq("bob"))).thenReturn(WatchlistResult.of("bob", Set.of(
-                new Film("dune-part-two", "Dune: Part Two (2024)", 2024),
-                new Film("anora", "Anora (2024)", 2024))));
-        when(posterService.findPosterUrl(any(), any())).thenReturn("https://image.tmdb.org/t/p/w342/poster.jpg");
-
-        mockMvc.perform(get("/api/intersect").param("user1", "alice").param("user2", "bob").param("random", "true"))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.length()").value(1));
-    }
-
-    @Test
-    void randomModeOnlyLooksUpAPosterForTheOneFilmItReturns() throws Exception {
-        when(scraperService.fetchWatchlist(eq("alice"))).thenReturn(WatchlistResult.of("alice", Set.of(
-                new Film("dune-part-two", "Dune: Part Two (2024)", 2024),
-                new Film("anora", "Anora (2024)", 2024),
-                new Film("the-substance", "The Substance (2024)", 2024))));
-        when(scraperService.fetchWatchlist(eq("bob"))).thenReturn(WatchlistResult.of("bob", Set.of(
-                new Film("dune-part-two", "Dune: Part Two (2024)", 2024),
-                new Film("anora", "Anora (2024)", 2024),
-                new Film("the-substance", "The Substance (2024)", 2024))));
-        when(posterService.findPosterUrl(any(), any())).thenReturn("https://image.tmdb.org/t/p/w342/poster.jpg");
-
-        mockMvc.perform(get("/api/intersect").param("user1", "alice").param("user2", "bob").param("random", "true"))
-                .andExpect(status().isOk());
-
-        verify(posterService, times(1)).findPosterUrl(any(), any());
-    }
-
-    @Test
-    void randomModeReturnsEmptyListWhenThereAreNoMatches() throws Exception {
-        when(scraperService.fetchWatchlist(eq("alice"))).thenReturn(WatchlistResult.of("alice", Set.of(
-                new Film("dune-part-two", "Dune: Part Two (2024)", 2024))));
-        when(scraperService.fetchWatchlist(eq("bob"))).thenReturn(WatchlistResult.of("bob", Set.of(
-                new Film("anora", "Anora (2024)", 2024))));
-
-        mockMvc.perform(get("/api/intersect").param("user1", "alice").param("user2", "bob").param("random", "true"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.length()").value(0));
     }

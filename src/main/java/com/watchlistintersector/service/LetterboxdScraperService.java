@@ -42,19 +42,14 @@ public class LetterboxdScraperService {
     }
 
     /**
-     * Cheap existence/accessibility check: fetches only page 1, without
-     * walking pagination. Used to validate a username before committing to a
-     * full {@link #fetchWatchlist} scrape.
-     *
-     * Letterboxd's Cloudflare protection challenges the plain profile page
-     * ({@code /{username}/}) even for real users, so it can't be scraped
-     * directly to check existence. The watchlist page isn't challenged and
-     * already carries both signals: a 404 means the username doesn't exist,
-     * while a 200 with no film tiles means the user exists but their
-     * watchlist isn't public (or is simply empty).
+     * @param username the Letterboxd username to check
+     * @return whether the username exists, whether its watchlist is public, and its
+     *         avatar URL if available
      */
     public UsernameCheck checkUsername(String username) {
         try {
+            // The plain profile page is blocked by Letterboxd's bot protection;
+            // the watchlist page isn't, and a 404 there still means the username doesn't exist.
             Document firstPage = get(watchlistUrl(username, 1));
             boolean watchlistPublic = !firstPage.select("[data-item-slug]").isEmpty();
             return UsernameCheck.existsWithWatchlist(watchlistPublic, extractAvatarUrl(firstPage));
@@ -70,10 +65,9 @@ public class LetterboxdScraperService {
     }
 
     /**
-     * The profile owner's avatar sits in the page header, same as film
-     * tiles it isn't behind Letterboxd's Cloudflare challenge, so it comes
-     * free with the watchlist page we already fetch. Null if the markup
-     * doesn't have it (e.g. a default/blank avatar with no img tag).
+     * @param page the fetched watchlist page
+     * @return the avatar image URL from the page header, or {@code null} if the
+     *         markup doesn't have one
      */
     private String extractAvatarUrl(Document page) {
         Element avatar = page.selectFirst(".profile-header a.avatar img");
@@ -83,6 +77,13 @@ public class LetterboxdScraperService {
         return avatar.attr("src");
     }
 
+    /**
+     * Scrapes a user's full watchlist, walking every page.
+     *
+     * @param username the Letterboxd username to scrape
+     * @return the films found, or an inaccessible result if the watchlist is
+     *         private, nonexistent, or the first page couldn't be fetched
+     */
     public WatchlistResult fetchWatchlist(String username) {
         String firstPageUrl = watchlistUrl(username, 1);
 
@@ -136,10 +137,9 @@ public class LetterboxdScraperService {
     }
 
     /**
-     * Parses the release year out of a title's trailing "(YYYY)", which is
-     * how Letterboxd formats it. Not derived from the slug: slugs are
-     * sometimes suffixed with a disambiguation year that differs from the
-     * film's actual release year (re-releases, regional premieres).
+     * @param title the film's title, as extracted from the page
+     * @return the release year parsed from a trailing "(YYYY)" in the title, or
+     *         {@code null} if the title has none
      */
     private Integer extractYear(String title) {
         Matcher matcher = YEAR_PATTERN.matcher(title);
@@ -147,10 +147,11 @@ public class LetterboxdScraperService {
     }
 
     /**
-     * The watchlist poster is lazy-loaded via JS, so its img[alt] is often a
-     * placeholder rather than the real title. The tile's own data attributes
-     * carry the title server-side and are preferred; img[alt] is a fallback
-     * for markup that doesn't set them.
+     * @param tile the film tile element
+     * @param slug the film's slug, used as a last-resort fallback title
+     * @return the tile's title, preferring {@code data-item-full-display-name},
+     *         then {@code data-item-name}, then the poster image's {@code alt}
+     *         text, then falling back to {@code slug}
      */
     private String extractTitle(Element tile, String slug) {
         String fullDisplayName = tile.attr("data-item-full-display-name");
@@ -170,8 +171,11 @@ public class LetterboxdScraperService {
 
     /**
      * Reads the highest page number linked from the pagination controls on
-     * page 1. Returns 1 (i.e. no further pages) if there's no pagination,
-     * which is the case for watchlists that fit on a single page.
+     * page 1.
+     *
+     * @param firstPage the fetched first page of the watchlist
+     * @return the last page number, or 1 (i.e. no further pages) if there's no
+     *         pagination, which is the case for watchlists that fit on a single page
      */
     private int readLastPageNumber(Document firstPage) {
         Elements pageLinks = firstPage.select(".paginate-pages a, .pagination a");
